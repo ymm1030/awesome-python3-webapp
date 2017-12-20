@@ -3,6 +3,8 @@
 import logging, asyncio
 import aiomysql
 
+'也可以使用sqlalchemy来做orm。这里是一个实现orm的模型。'
+
 def log(sql, args=()):
     logging.info('SQL: %s' % sql)
 
