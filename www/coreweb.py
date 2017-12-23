@@ -157,6 +157,5 @@ def add_routes(app, module_name):
         if callable(fn):
             method = getattr(fn, '__method__', None)
             path = getattr(fn, '__route__', None)
-            logging.info('__method__:%s, __route__:%s, fn:%s' % (method, path, fn))
             if method and path:
                 add_route(app, fn)
