@@ -45,7 +45,8 @@ import orm, asyncio
 def test(lp):
     yield from orm.create_pool(lp, user='ymm', password='ymm', db='awesome')
     u = User(name='Test', email='test@example.com', passwd='123456', image='about:blank')
-    yield from u.save()
+    print(getattr(u, 'email'))
+    # yield from u.save()
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()

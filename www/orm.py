@@ -128,6 +128,7 @@ class ModelMetaClass(type):
 class Model(dict, metaclass = ModelMetaClass):
     def __init__(self, **kw):
         super(Model, self).__init__(**kw)
+        print('----- keys:', self.keys())
 
     def __getattr__(self, key):
         try:
