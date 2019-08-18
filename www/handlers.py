@@ -7,6 +7,7 @@ import hashlib
 import logging
 import json
 import markdown2
+import requests
 from coreweb import get, post
 from model import User, Blog, Comment, next_id
 from apis import APIError, APIPermissionError, APIResourceNotFoundError, APIValueError, Page
@@ -282,3 +283,16 @@ def api_delete_blog(request, *, id):
     yield from blog.remove()
     return dict(id=id)
 
+@get('/api/wechat')
+def get_wechatdata(code):
+    if not code:
+        raise APIValueError('code')
+
+    appid = 'wxe1f28908dc094cbc'
+    secret = 'c756d64aab8c6841b80bf01807409502'
+    url = r'https://api.weixin.qq.com/sns/jscode2session?appid=' + appid + r'&secret=' + secret + r'&grant_type=authorization_code&js_code=' + code
+    res = requests.get(url)
+    r = web.Response()
+    r.content_type = 'application/json'
+    r.body = res.json()
+    return r
