@@ -4,7 +4,9 @@ create database awesome;
 
 use awesome;
 
-grant select, insert, update, delete on awesome.* to 'ymm'@'localhost' identified by 'ymm';
+drop user if exists 'ymm'@'localhost';
+create user 'ymm'@'localhost' identified by 'ymm';
+grant select, insert, update, delete on awesome.* to 'ymm'@'localhost';
 
 create table users (
     `id` varchar(50) not null,
