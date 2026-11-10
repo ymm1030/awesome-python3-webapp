@@ -11,15 +11,16 @@ from coreweb import add_routes, add_static
 
 from handlers import cookie2user, _COOKIE_NAME
 
+
 def init_jinja2(app, **kw):
     logging.info('init jinjia2...')
     options = dict(
-        autoescape = kw.get('autoescape', True),
-        block_start_string = kw.get('block_start_string', '{%'),
-        block_end_string = kw.get('block_end_string', '%}'),
-        variable_start_string = kw.get('variable_start_string', '{{'),
-        variable_end_string = kw.get('variable_end_string', '}}'),
-        auto_reload = kw.get('auto_reload', True)
+        autoescape=kw.get('autoescape', True),
+        block_start_string=kw.get('block_start_string', '{%'),
+        block_end_string=kw.get('block_end_string', '%}'),
+        variable_start_string=kw.get('variable_start_string', '{{'),
+        variable_end_string=kw.get('variable_end_string', '}}'),
+        auto_reload=kw.get('auto_reload', True)
     )
     path = kw.get('path', None)
     if path is None:
@@ -32,11 +33,13 @@ def init_jinja2(app, **kw):
             env.filters[name] = f
     app['__templating__'] = env
 
+
 async def logger_factory(app, handler):
     async def logger(request):
         logging.info('Request: %s %s' % (request.method, request.path))
         return (await handler(request))
     return logger
+
 
 async def auth_factory(app, handler):
     async def auth(request):
@@ -53,6 +56,7 @@ async def auth_factory(app, handler):
         return (await handler(request))
     return auth
 
+
 async def data_factory(app, handler):
     async def parse_data(request):
         if request.method == 'POST':
@@ -65,10 +69,12 @@ async def data_factory(app, handler):
         return (await handler(request))
     return parse_data
 
+
 async def response_factory(app, handler):
     async def response(request):
         logging.info('Response handler...')
         r = await handler(request)
+        # coreweb 已经统一转成 web.Response 了，这里主要兜底
         if isinstance(r, web.StreamResponse):
             return r
         if isinstance(r, bytes):
@@ -92,38 +98,35 @@ async def response_factory(app, handler):
                 resp = web.Response(body=app['__templating__'].get_template(template).render(**r).encode('utf-8'))
                 resp.content_type = 'text/html;charset=utf-8'
                 return resp
-        if isinstance(r, int) and t >= 100 and t < 600:
-            return web.Response(t)
+        if isinstance(r, int) and 100 <= r < 600:
+            return web.Response(status=r)              # ← 修：t -> r，关键字参数
         if isinstance(r, tuple) and len(r) == 2:
             t, m = r
-            if isinstance(t, int) and t >= 100 and t < 600:
-                return web.Response(t, str(m))
-        #default:
+            if isinstance(t, int) and 100 <= t < 600:
+                return web.Response(status=t, text=str(m))   # ← 修：关键字参数
         resp = web.Response(body=str(r).encode('utf-8'))
         resp.content_type = 'text/plain;charset=utf-8'
         return resp
     return response
+
 
 def datetime_filter(t):
     delta = int(time.time() - t)
     if delta < 60:
         return u'1分钟前'
     if delta < 3600:
-        return u'%s分钟前' % (delta//60)
+        return u'%s分钟前' % (delta // 60)
     if delta < 86400:
-        return u'%s小时前' % (delta//3600)
+        return u'%s小时前' % (delta // 3600)
     if delta < 604800:
-        return u'%s天前' % (delta//86400)
+        return u'%s天前' % (delta // 86400)
     dt = datetime.fromtimestamp(t)
     return u'%s年%s月%s日' % (dt.year, dt.month, dt.day)
 
-# def index(request):
-#     return web.Response(body='<h1>Awesome!</h1>'.encode('utf-8'), content_type='text/html')
 
 async def init(loop):
     await orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='ymm', password='ymm', db='awesome')
-    app = web.Application(loop=loop, middlewares=[logger_factory, auth_factory, response_factory])
-    # app.router.add_route('GET', '/', index)
+    app = web.Application(middlewares=[logger_factory, auth_factory, response_factory])  # ← 去掉 loop
     init_jinja2(app, filters=dict(datetime=datetime_filter))
     add_routes(app, 'handlers')
     add_static(app)
@@ -131,11 +134,7 @@ async def init(loop):
     logging.info('server started at http://127.0.0.1:9000...')
     return srv
 
+
 loop = asyncio.get_event_loop()
 loop.run_until_complete(init(loop))
 loop.run_forever()
-
-# 写法2:
-# app = web.Application()
-# app.router.add_get('/', index)
-# web.run_app(app, host='127.0.0.1', port=9000)

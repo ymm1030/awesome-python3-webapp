@@ -3,9 +3,11 @@ import asyncio
 import os
 import inspect
 import logging
+import json
 from urllib import parse
 from aiohttp import web
 from apis import APIError
+
 
 def get(path):
     def decorator(func):
@@ -17,6 +19,7 @@ def get(path):
         return wrapper
     return decorator
 
+
 def post(path):
     def decorator(func):
         @functools.wraps(func)
@@ -27,6 +30,7 @@ def post(path):
         return wrapper
     return decorator
 
+
 def get_required_kw_args(fn):
     args = []
     params = inspect.signature(fn).parameters
@@ -34,6 +38,7 @@ def get_required_kw_args(fn):
         if param.kind == inspect.Parameter.KEYWORD_ONLY and param.default == inspect.Parameter.empty:
             args.append(name)
     return tuple(args)
+
 
 def get_named_kw_args(fn):
     args = []
@@ -43,17 +48,20 @@ def get_named_kw_args(fn):
             args.append(name)
     return tuple(args)
 
+
 def has_named_kw_args(fn):
     params = inspect.signature(fn).parameters
     for name, param in params.items():
         if param.kind == inspect.Parameter.KEYWORD_ONLY:
             return True
 
+
 def has_var_kw_arg(fn):
     params = inspect.signature(fn).parameters
     for name, param in params.items():
         if param.kind == inspect.Parameter.VAR_KEYWORD:
             return True
+
 
 def has_request_arg(fn):
     sig = inspect.signature(fn)
@@ -66,6 +74,63 @@ def has_request_arg(fn):
         if found and (param.kind != inspect.Parameter.VAR_POSITIONAL and param.kind != inspect.Parameter.KEYWORD_ONLY and param.kind != inspect.Parameter.VAR_KEYWORD):
             raise ValueError('request parameter must be the last named parameter in function: %s%s' % (fn.__name__, str(sig)))
     return found
+
+
+def _default(o):
+    """json.dumps 的 default，把模型对象转成 dict"""
+    if hasattr(o, '__dict__'):
+        return o.__dict__
+    return str(o)
+
+
+def _dumps(obj):
+    return json.dumps(obj, ensure_ascii=False, default=_default)
+
+
+def _build_response(app, r, request=None):
+    """把 handler 的返回值统一转换成 web.Response"""
+    # 已经是 Response 就直接返回
+    if isinstance(r, web.StreamResponse):
+        return r
+
+    # bytes
+    if isinstance(r, bytes):
+        return web.Response(body=r, content_type='application/octet-stream')
+
+    # 字符串
+    if isinstance(r, str):
+        if r.startswith('redirect:'):
+            return web.HTTPFound(r[9:])
+        return web.Response(text=r, content_type='text/html')
+
+    # dict：区分模板渲染和 JSON 响应
+    if isinstance(r, dict):
+        template = r.get('__template__')
+        if template is None:
+            return web.json_response(r, dumps=_dumps)
+        env = app['__templating__']
+        ctx = dict(r)
+        if request is not None:
+            ctx['__user__'] = getattr(request, '__user__', None)
+        body = env.get_template(template).render(**ctx)
+        return web.Response(text=body, content_type='text/html')
+
+    # 状态码
+    if isinstance(r, int) and 100 <= r < 600:
+        return web.Response(status=r)
+
+    # (status, text) 元组
+    if isinstance(r, tuple) and len(r) == 2:
+        t, m = r
+        if isinstance(t, int) and 100 <= t < 600:
+            return web.Response(status=t, text=str(m))
+
+    # 模型对象（User / Blog / Comment 等）
+    if hasattr(r, '__dict__'):
+        return web.json_response(r.__dict__, dumps=_dumps)
+
+    return web.Response(text=str(r))
+
 
 class RequestHandler(object):
     def __init__(self, app, fn):
@@ -113,35 +178,39 @@ class RequestHandler(object):
                 if k in kw:
                     logging.warning('Duplicate arg name in named arg and kw args: %s' % k)
                 kw[k] = v
-        
+
         if self._has_request_arg:
             kw['request'] = request
 
         if self._require_kw_args:
             for name in self._require_kw_args:
-                if not name in kw:
+                if name not in kw:
                     return web.HTTPBadRequest(text='Missing argument: %s' % name)
         logging.info('call with args: %s' % str(kw))
         try:
             r = await self._func(**kw)
-            return r
+            return _build_response(self._app, r, request)          # 传 request，注入 __user__
         except APIError as e:
-            return dict(error=e.error, data=e.data, message=e.message)
+            return _build_response(self._app, dict(error=e.error, data=e.data, message=e.message), request)
+
 
 def add_static(app):
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
     app.router.add_static('/static', path)
     logging.info('add static %s ==> %s' % ('/static/', path))
 
+
 def add_route(app, fn):
     method = getattr(fn, '__method__', None)
     path = getattr(fn, '__route__', None)
     if path is None or method is None:
         raise ValueError('@get or @post not defined in %s.' % str(fn))
-    if not asyncio.iscoroutinefunction(fn) and not inspect.isgeneratorfunction(fn):
+    # 统一包装成协程（兼容普通函数、生成器函数、async def）
+    if not asyncio.iscoroutinefunction(fn):
         fn = asyncio.coroutine(fn)
     logging.info('add route %s %s ==> %s(%s)' % (method, path, fn.__name__, ','.join(inspect.signature(fn).parameters.keys())))
     app.router.add_route(method, path, RequestHandler(app, fn))
+
 
 def add_routes(app, module_name):
     n = module_name.rfind('.')
